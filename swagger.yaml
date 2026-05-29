@@ -1,0 +1,294 @@
+openapi: 3.0.0
+info:
+  title: Team Task Tracker API
+  version: 1.0.0
+  description: |
+    REST API for a team-based task tracker with JWT auth, RBAC, Redis caching, and Docker deployment.
+    Built by Shubham Sharma — SDE II Assignment.
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        status: { type: integer }
+        code: { type: string }
+        message: { type: string }
+
+    User:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [ADMIN, MANAGER, MEMBER] }
+        organization: { type: string }
+
+    Task:
+      type: object
+      properties:
+        _id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        priority: { type: string, enum: [LOW, MEDIUM, HIGH] }
+        status: { type: string, enum: [TODO, IN_PROGRESS, IN_REVIEW, DONE, BLOCKED] }
+        assignee: { $ref: '#/components/schemas/User' }
+        due_date: { type: string, format: date-time }
+
+security:
+  - BearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, organization]
+              properties:
+                name: { type: string, example: "Shubham Sharma" }
+                email: { type: string, example: "shubham@example.com" }
+                password: { type: string, example: "password123" }
+                organization: { type: string, example: "NxtWave" }
+                role: { type: string, enum: [ADMIN, MANAGER, MEMBER], example: ADMIN }
+      responses:
+        '201':
+          description: User registered successfully
+        '409':
+          description: Email already exists
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and get tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, example: "shubham@example.com" }
+                password: { type: string, example: "password123" }
+      responses:
+        '200':
+          description: Login successful with accessToken and refreshToken
+        '401':
+          description: Invalid credentials
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: New access and refresh tokens
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout current user
+      responses:
+        '200':
+          description: Logged out
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: Current user
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List all users in the organization
+      responses:
+        '200':
+          description: List of users
+
+  /users/{id}/role:
+    patch:
+      tags: [Users]
+      summary: Update user role (ADMIN only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [ADMIN, MANAGER, MEMBER] }
+      responses:
+        '200':
+          description: Role updated
+        '403':
+          description: Forbidden
+
+  /tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks with pagination and filters
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: status
+          in: query
+          schema: { type: string, enum: [TODO, IN_PROGRESS, IN_REVIEW, DONE, BLOCKED] }
+        - name: priority
+          in: query
+          schema: { type: string, enum: [LOW, MEDIUM, HIGH] }
+        - name: assignee
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated task list
+
+    post:
+      tags: [Tasks]
+      summary: Create a task (ADMIN or MANAGER)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, assignee]
+              properties:
+                title: { type: string, example: "Build login page" }
+                description: { type: string }
+                priority: { type: string, enum: [LOW, MEDIUM, HIGH], default: MEDIUM }
+                assignee: { type: string, example: "64f1234abc..." }
+                due_date: { type: string, format: date-time, example: "2026-06-15T00:00:00.000Z" }
+      responses:
+        '201':
+          description: Task created
+        '403':
+          description: Forbidden — MEMBER cannot create tasks
+
+  /tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: Get a single task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Task object
+        '404':
+          description: Task not found
+
+    patch:
+      tags: [Tasks]
+      summary: Update task fields (ADMIN or MANAGER)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                description: { type: string }
+                priority: { type: string, enum: [LOW, MEDIUM, HIGH] }
+                assignee: { type: string }
+                due_date: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Task updated
+
+    delete:
+      tags: [Tasks]
+      summary: Delete a task (ADMIN only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Task deleted
+        '403':
+          description: Forbidden
+
+  /tasks/{id}/status:
+    patch:
+      tags: [Tasks]
+      summary: Transition task status
+      description: |
+        Enforced transitions: TODO → IN_PROGRESS → IN_REVIEW → DONE
+        BLOCKED is reachable from any active state.
+        Only the assignee or MANAGER/ADMIN can change status.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [TODO, IN_PROGRESS, IN_REVIEW, DONE, BLOCKED] }
+      responses:
+        '200':
+          description: Status transitioned
+        '400':
+          description: Invalid transition
+
+  /analytics:
+    get:
+      tags: [Analytics]
+      summary: Get overdue task counts and avg completion time per user (ADMIN or MANAGER)
+      responses:
+        '200':
+          description: Analytics data
+        '403':
+          description: Forbidden
