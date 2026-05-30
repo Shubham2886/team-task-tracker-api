@@ -19,6 +19,19 @@ async function createTask(req, res, next) {
       return next(createError(404, 'NOT_FOUND', 'Assignee not found in your organization'));
     }
 
+    // RBAC business rule
+if (
+  req.user.role === 'MANAGER' &&
+  assigneeUser.role === 'ADMIN'
+) {
+  return next(
+    createError(
+      403,
+      'FORBIDDEN',
+      'Managers cannot assign tasks to admins'
+    )
+  );
+}
     const task = await Task.create({
       title,
       description,
